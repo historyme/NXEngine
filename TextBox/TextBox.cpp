@@ -272,7 +272,7 @@ void TextBox::DrawTextBox()
 	}
 	
 	// draw text lines (the 4th line is for the first char shown on the new line during scrolling)
-	int char_spacing = (fFlags & TB_VARIABLE_WIDTH_CHARS) ? 0 : 6;
+	int char_spacing = (fFlags & TB_VARIABLE_WIDTH_CHARS) ? 0 : 8;
 	int y = (text_top + fTextYOffset);
 	
 	for(int i=0;i<MSG_NLINES;i++)
@@ -311,6 +311,8 @@ void TextBox::AddNextChar(void)
 		{	// went over end of line
 			fCurLineLen = 0;
 			fCurLine++;
+
+			memset(fLines[fCurLine],0x00,80);
 			
 			// - in line-at-once mode we stop once we hit a CR
 			// - in char-at-once mode we don't count the CR as being the one char we added

@@ -37,6 +37,10 @@ public:
 	
 	SDL_Surface *letters[NUM_FONT_LETTERS];
 
+#if defined(CONFIG_ENABLE_TTF)
+    TTF_Font *m_ttffonthandle;
+#endif
+
 private:
 	void ReplaceColor(SDL_Surface *sfc, uint32_t oldcolor, uint32_t newcolor);
 };
@@ -52,5 +56,8 @@ int font_draw_shaded(int x, int y, const char *text, int spacing=0, NXFont *font
 
 int GetFontWidth(const char *text, int spacing=0, bool is_shaded=false);
 int GetFontHeight();
+
+SDL_Surface *getTTFSurface(NXFont *font,char *word);
+
 
 #endif

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <iconv.h>
 #include "../graphics/safemode.h"
 #include "../common/StringList.h"
 #include "../common/basics.h"
@@ -49,11 +50,45 @@ const char *npcsetnames[] =
 };
 
 
+int code_convert(char *from_charset,char *to_charset,char *inbuf,size_t *inlen,char *outbuf,size_t *outlen)  
+{  
+        iconv_t cd;  
+        int rc;  
+        char **pin = &inbuf;  
+        char **pout = &outbuf;  
+  
+        cd = iconv_open(to_charset,from_charset);  
+        if (cd==0) 
+        {
+        	return -1;
+        }
+		
+        memset(outbuf,0,*outlen);  
+        size_t ret = iconv(cd,pin,inlen,pout,outlen);
+        iconv_close(cd);  
+		
+        return 0;  
+}  
+  
+int u2g(char *inbuf,size_t *inlen,char *outbuf,size_t *outlen)  
+{  
+        return code_convert("utf-8","gb2312",inbuf,inlen,outbuf,outlen);  
+}  
+  
+int g2u(char *inbuf,size_t *inlen,char *outbuf,size_t *outlen)  
+{  
+        return code_convert("gb2312","utf-8",inbuf,inlen,outbuf,outlen);  
+} 
+
+
+
 bool extract_stages(FILE *exefp)
 {
 int i;
 
 	status("[ stage.dat ]");
+
+	char name[35];
 	
 	// load raw data into struct
 	fseek(exefp, DATA_OFFSET, SEEK_SET);
@@ -66,7 +101,12 @@ int i;
 	for(i=0;i<NMAPS;i++)
 	{
 		strcpy(mapdata[i].filename, exemapdata[i].filename);
-		strcpy(mapdata[i].stagename, exemapdata[i].caption);
+		
+		memset(name,0x00,35);
+		size_t inlen = strlen(exemapdata[i].caption);
+		size_t outlen = 34;
+		g2u(exemapdata[i].caption,&inlen,name,&outlen);
+		strcpy(mapdata[i].stagename, name);
 		
 		mapdata[i].scroll_type = exemapdata[i].scroll_type;
 		mapdata[i].bossNo = exemapdata[i].bossNo;

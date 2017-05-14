@@ -1,4 +1,9 @@
 
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+
+
 #include "../config.h"
 #include <SDL/SDL.h>
 
@@ -44,6 +49,11 @@ const char *ttffontfile = "DroidSansMono.ttf";
 #else
 const char *ttffontfile = "font.ttf";
 #endif
+
+#if defined(CONFIG_ENABLE_TTF)
+static TTF_Font *ttffonthandle;
+#endif
+
 
 static SDL_Surface *sdl_screen = NULL;
 static SDL_Surface *shadesfc = NULL;
@@ -108,19 +118,17 @@ bool error = false;
 			return 1;
 		}
 
-        TTF_Font *font = TTF_OpenFont(ttffontfile, pointsize[SCALE]);
-		if (!font)
+        ttffonthandle = TTF_OpenFont(ttffontfile, pointsize[SCALE]);
+		if (!ttffonthandle)
 		{
 			staterr("Couldn't open font: '%s'", ttffontfile);
 			return 1;
 		}
 
-		error |= whitefont.InitChars(font, 0xffffff);
-		error |= greenfont.InitChars(font, 0x00ff80);
-		error |= bluefont.InitChars(font, 0xa0b5de);
-		error |= shadowfont.InitCharsShadowed(font, 0xffffff, 0x000000);
-
-		TTF_CloseFont(font);
+		error |= whitefont.InitChars(ttffonthandle, 0xffffff);
+		error |= greenfont.InitChars(ttffonthandle, 0x00ff80);
+		error |= bluefont.InitChars(ttffonthandle, 0xa0b5de);
+		error |= shadowfont.InitCharsShadowed(ttffonthandle, 0xffffff, 0x000000);
 	}
     #endif
 
@@ -134,7 +142,12 @@ bool error = false;
 
 void font_close(void)
 {
-
+#if defined(CONFIG_ENABLE_TTF)
+    if(!ttffonthandle)
+    {
+	    TTF_CloseFont(ttffonthandle);
+    }
+#endif
 }
 
 bool font_reload()
@@ -182,6 +195,8 @@ bool NXFont::InitChars(TTF_Font *font, uint32_t color)
 SDL_Color fgcolor;
 SDL_Surface *letter;
 
+	m_ttffonthandle = font;
+
 	fgcolor.r = (uint8_t)(color >> 16);
 	fgcolor.g = (uint8_t)(color >> 8);
 	fgcolor.b = (uint8_t)(color);
@@ -221,6 +236,8 @@ bool NXFont::InitCharsShadowed(TTF_Font *font, uint32_t color, uint32_t shadowco
 SDL_Color fgcolor, shcolor;
 SDL_Surface *top, *bottom;
 SDL_Rect dstrect;
+
+	m_ttffonthandle = font;
 
 	fgcolor.r = (uint8_t)(color >> 16);
 	fgcolor.g = (uint8_t)(color >> 8);
@@ -309,10 +326,10 @@ int NXFont::win1251_to_utf8(const char *text, char *utext)
             }
         }
         // Unicode to UTF-8
-        // 0x00000000 â€” 0x0000007F -> 0xxxxxxx
-        // 0x00000080 â€” 0x000007FF -> 110xxxxx 10xxxxxx
-        // 0x00000800 â€” 0x0000FFFF -> 1110xxxx 10xxxxxx 10xxxxxx
-        // 0x00010000 â€” 0x001FFFFF -> 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+        // 0x00000000 ¡ª 0x0000007F -> 0xxxxxxx
+        // 0x00000080 ¡ª 0x000007FF -> 110xxxxx 10xxxxxx
+        // 0x00000800 ¡ª 0x0000FFFF -> 1110xxxx 10xxxxxx 10xxxxxx
+        // 0x00010000 ¡ª 0x001FFFFF -> 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         if (wc<0x80) {
             utext[j++] = (char)wc;
         } else if (wc<0x800) {
@@ -507,6 +524,38 @@ SDL_Rect dstrect;
 #endif
 
 
+#ifndef Uint16
+#define Uint16 unsigned short
+#endif
+
+int get_utf8_size(const char pInput)
+{
+	unsigned char c = pInput;
+	// 0xxxxxxx ·µ»Ø1
+	// 10xxxxxx ²»´æÔÚ·µ»Ø-1
+	// 110xxxxx ·µ»Ø2
+	// 1110xxxx ·µ»Ø3
+	// 11110xxx ·µ»Ø4
+	// 111110xx ·µ»Ø5
+	// 1111110x ·µ»Ø6
+	if(c< 0x80) return 1;
+	if(c>=0x80 && c<0xC0) return -1;
+	if(c>=0xC0 && c<0xE0) return 2;
+	if(c>=0xE0 && c<0xF0) return 3;
+	if(c>=0xF0 && c<0xF8) return 4;
+	if(c>=0xF8 && c<0xFC) return 5;
+	if(c>=0xFC) return 6;
+}
+
+
+
+
+const SDL_Color RGB_Black   = { 0, 0, 0 };  
+const SDL_Color RGB_Red     = { 255, 0, 0 };  
+const SDL_Color RGB_White   = { 255, 255, 255 };  
+const SDL_Color RGB_Yellow  = { 255, 255, 0 };  
+
+
 // draw a text string
 static int text_draw(int x, int y, const char *text, int spacing, NXFont *font)
 {
@@ -514,12 +563,27 @@ int orgx = x;
 int i;
 SDL_Rect dstrect;
 
-	for(i=0;text[i];i++)
-	{
-		uint8_t ch = text[i];
-		SDL_Surface *letter = font->letters[ch];
+	SDL_Surface *word;
 
-		if (ch == '=' && game.mode != GM_CREDITS)
+	for(i=0;text[i];)
+	{
+		char str[7];
+		memset(str,0x00,sizeof(str));
+		long utf8_word_size = get_utf8_size(text[i]);
+
+		for(int j=0;j<utf8_word_size;j++)
+		{
+			str[j] = text[i+j];
+			//Óöµ½¿Õ×Ö½ÚÊ±ºò£¬²»ÔÙ»æÖÆ
+			if(!text[i+j])
+			{
+				return (x - orgx);
+			}
+		}
+
+		i+=utf8_word_size;
+		
+		if (str[0] == '=' && game.mode != GM_CREDITS)
 		{
 			if (rendering)
 			{
@@ -527,13 +591,17 @@ SDL_Rect dstrect;
 				draw_sprite((x/SCALE), (y/SCALE)+yadj, SPR_TEXTBULLET);
 			}
 		}
-		else if (rendering && ch != ' ' && letter)
+		else if (rendering && str[0] != ' ')
 		{
-			// must set this every time, because SDL_BlitSurface overwrites
-			// dstrect with final clipping rectangle.
-			dstrect.x = x;
-			dstrect.y = y;
-			SDL_BlitSurface(letter, NULL, sdl_screen, &dstrect);
+			word = getTTFSurface(font,str);
+			if(word)
+			{			
+				// must set this every time, because SDL_BlitSurface overwrites
+				// dstrect with final clipping rectangle.
+				dstrect.x = x;
+				dstrect.y = y;
+				SDL_BlitSurface(word, NULL, sdl_screen, &dstrect);	
+			}
 		}
 
 		if (spacing != 0)
@@ -542,19 +610,19 @@ SDL_Rect dstrect;
 		}
 		else
 		{	// variable spacing
-			if (ch == ' ' && shrink_spaces)
+			if (str[0] == ' ' && shrink_spaces)
 			{	// 10.5 px for spaces - make smaller than they really are - the default
 				x += (SCALE == 1) ? 5 : 10;
 				if (i & 1) x++;
 			}
 			else
 			{
-				if (letter)
-					x += letter->w;
+				if (word)
+					x += word->w;
 			}
 		}
 	}
-
+	
 	// return the final width of the text drawn
     return (x - orgx);
 }
@@ -658,6 +726,95 @@ int wd;
 }
 
 
+
+typedef struct TTF_NODE
+{
+	SDL_Surface *surface;
+	char word[7];
+	
+	TTF_NODE *next;
+}TTF_NODE;
+
+static TTF_NODE *TTFheader = NULL;
+
+void initTTFList()
+{
+	TTFheader = (TTF_NODE *)malloc(sizeof(TTF_NODE));
+	TTFheader->next = NULL;
+	memset(TTFheader->word,0x00,7);
+	TTFheader->surface = NULL;
+}
+
+void insertTTFNode(TTF_NODE *header,char *word,SDL_Surface *surface)
+{
+	TTF_NODE *tmp = header;
+	TTF_NODE *node = (TTF_NODE *)malloc(sizeof(TTF_NODE));
+	node->next = NULL;
+	memcpy(node->word,word,7);
+	node->surface = surface;
+
+	while(tmp->next)
+	{
+		tmp = tmp->next;
+	}
+	tmp->next = node;
+}
+
+
+SDL_Surface *TTFListContent(TTF_NODE *header,char *word)
+{
+	TTF_NODE *tmp = header;
+  	while(tmp->next)
+  	{
+  	    int sum = 0;
+  	    for(int i = 0;i<7;i++)
+  	    {
+	  		if(word[i] == tmp->word[i])
+	  		{
+	  		    sum++;
+	  		}
+  	    }
+
+		if(7 == sum)
+		{
+			return tmp->surface;
+		}
+
+  		tmp = tmp->next;
+  	}  
+	return NULL;
+}
+
+
+
+SDL_Surface *getTTFSurface(NXFont *font,char *word)
+{
+	SDL_Surface *tmp = NULL;
+	
+	if(NULL == TTFheader)
+	{
+		initTTFList();
+	}
+
+	tmp = TTFListContent(TTFheader,word);
+	if(NULL == tmp)
+	{
+
+		if(0x00 == word[0] && 0x00 == word[2]&&
+		  0x00 == word[3] && 0x00 == word[4]&&
+		  0x00 == word[5] &&0x00 == word[6] && 
+		  0x00 == word[7])
+		{
+		    return NULL;
+		}
+
+		
+		tmp = TTF_RenderUTF8_Solid(font->m_ttffonthandle,word,RGB_White);
+		insertTTFNode(TTFheader,word,tmp);
+	}
+	
+	return tmp;
+}
 
 
 
